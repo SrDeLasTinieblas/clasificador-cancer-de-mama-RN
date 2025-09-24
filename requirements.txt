@@ -1,0 +1,11 @@
+pandas==1.5.3
+numpy==1.23.5
+matplotlib==3.7.1
+seaborn==0.12.2
+Pillow==9.5.0
+tensorflow==2.12.0
+keras==2.12.0
+scikit-learn==1.2.2
+h5py==3.8.0
+requests==2.31.0
+streamlit==1.22.0
