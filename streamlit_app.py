@@ -70,36 +70,79 @@ def load_model_with_progress():
 
 # Function to preprocess and make predictions
 def predict(image, model):
-    # Convert image to numpy array
+    try:
+        # Convertir PIL Image a RGB si es necesario (elimina canal alpha si existe)
+        if image.mode == 'RGBA':
+            # Crear fondo blanco y pegar la imagen con alpha
+            background = Image.new('RGB', image.size, (255, 255, 255))
+            background.paste(image, mask=image.split()[-1])  # Usar canal alpha como máscara
+            image = background
+        elif image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Convert image to numpy array
+        img_array = np.array(image)
+        
+        # Verificar que tenga exactamente 3 canales
+        if img_array.ndim == 2:
+            # Grayscale: convertir a RGB duplicando el canal
+            img_array = np.stack([img_array] * 3, axis=-1)
+        elif img_array.ndim == 3:
+            if img_array.shape[-1] == 1:
+                # 1 canal: duplicar para hacer RGB
+                img_array = np.repeat(img_array, 3, axis=-1)
+            elif img_array.shape[-1] == 4:
+                # 4 canales (RGBA): tomar solo RGB
+                img_array = img_array[:, :, :3]
+            elif img_array.shape[-1] != 3:
+                # Cualquier otro número de canales: error
+                raise ValueError(f"Número de canales no soportado: {img_array.shape[-1]}")
+        
+        # Asegurar que es exactamente 3 canales
+        if img_array.shape[-1] != 3:
+            raise ValueError(f"La imagen debe tener 3 canales RGB, pero tiene {img_array.shape[-1]}")
+        
+        # Convertir a float32 y normalizar
+        img_array = img_array.astype(np.float32) / 255.0
+        
+        # Redimensionar a 256x256 (tamaño esperado por tu modelo)
+        img_array = tf.image.resize(img_array, (256, 256))
+        
+        # Agregar dimensión batch
+        img_array = np.expand_dims(img_array, axis=0)  # 1 x height x width x 3
+        
+        # Verificar dimensiones finales
+        if img_array.shape != (1, 256, 256, 3):
+            raise ValueError(f"Forma inesperada del array: {img_array.shape}, esperado: (1, 256, 256, 3)")
+        
+        # Hacer predicción
+        predictions = model.predict(img_array)
+        
+        # Obtener probabilidades y clase predicha
+        probabilities = predictions[0]
+        predicted_class_index = np.argmax(probabilities)
+        predicted_class = class_mapping[predicted_class_index]
+        confidence = probabilities[predicted_class_index]
+        
+        return predicted_class, confidence, probabilities
+        
+    except Exception as e:
+        raise ValueError(f"Error en el preprocesamiento: {str(e)}")
+        
+def preprocess_image_debug(image):
+    """Función auxiliar para debuggear problemas de imagen"""
+    info = {
+        'mode': image.mode,
+        'size': image.size,
+        'format': getattr(image, 'format', 'Unknown')
+    }
+    
+    # Convertir a array para ver dimensiones
     img_array = np.array(image)
-
-    # Si es grayscale (2D), agregar la dimensión de canales
-    if img_array.ndim == 2:
-        img_array = img_array[..., np.newaxis]  # height x width x 1
-
-    # Si tiene solo 1 canal y tu modelo espera 3 canales, convertir a 3 canales
-    if img_array.shape[-1] == 1:
-        img_array = np.repeat(img_array, 3, axis=-1)  # height x width x 3
-
-    # Convertir a float32 y normalizar
-    img_array = img_array.astype(np.float32) / 255.0
-
-    # Redimensionar
-    img_array = tf.image.resize(img_array, (256, 256))  # Ajusta según tu modelo
-
-    # Agregar dimensión batch
-    img_array = np.expand_dims(img_array, axis=0)  # 1 x height x width x channels
-
-    # Hacer predicción
-    predictions = model.predict(img_array)
+    info['array_shape'] = img_array.shape
+    info['array_dtype'] = img_array.dtype
     
-    # Obtener probabilidades y clase predicha
-    probabilities = predictions[0]
-    predicted_class_index = np.argmax(probabilities)
-    predicted_class = class_mapping[predicted_class_index]
-    confidence = probabilities[predicted_class_index]
-    
-    return predicted_class, confidence, probabilities
+    return info
 
 def create_csv_report(results):
     """Crear un DataFrame con los resultados y convertirlo a CSV"""
@@ -169,6 +212,11 @@ if uploaded_files:
             try:
                 # Open and process image
                 image = Image.open(uploaded_file)
+                
+                # Debug info (opcional, solo para desarrollo)
+                # img_info = preprocess_image_debug(image)
+                # st.write(f"Debug {uploaded_file.name}: {img_info}")
+                
                 predicted_class, confidence, probabilities = predict(image, model)
                 
                 # Store results
@@ -183,7 +231,17 @@ if uploaded_files:
                 results.append(result)
                 
             except Exception as e:
-                st.error(f"Error procesando {uploaded_file.name}: {str(e)}")
+                error_msg = str(e)
+                st.error(f"Error procesando {uploaded_file.name}: {error_msg}")
+                
+                # Intentar obtener información de debug de la imagen problemática
+                try:
+                    image = Image.open(uploaded_file)
+                    img_info = preprocess_image_debug(image)
+                    st.write(f"Información de la imagen: {img_info}")
+                except:
+                    st.write("No se pudo obtener información adicional de la imagen")
+                
                 result = {
                     'Nombre_Archivo': uploaded_file.name,
                     'Prediccion': 'ERROR',
