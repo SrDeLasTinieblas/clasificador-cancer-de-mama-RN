@@ -881,9 +881,10 @@ else:
             st.sidebar.write("Error listando archivos de la carpeta")
 
 # Limpiar cache si es necesario
-if st.sidebar.button("🧹 Limpiar Cache y Recargar Modelo"):
-    st.cache_resource.clear()
-    st.rerun()
+# if st.sidebar.button("🧹 Limpiar Cache y Recargar Modelo"):
+#     st.cache_resource.clear()
+#     st.session_state.cache_cleared = True
+#     st.experimental_rerun()
 
 @st.cache_resource
 def load_local_model():
@@ -891,12 +892,10 @@ def load_local_model():
     Carga un modelo local desde un archivo .h5
     """
     try:
-        # st.write(f"Intentando cargar modelo desde: {MODEL_PATH}")  # Debug
         model = tf.keras.models.load_model(MODEL_PATH)
-        # st.write("✅ Modelo cargado exitosamente")  # Debug
         return model
     except Exception as e:
-        st.error(f"Error cargando el modelo desde {MODEL_PATH}: {str(e)}")
+        # st.error(f"Error cargando el modelo desde {MODEL_PATH}: {str(e)}")
         return None
 
 # Function to preprocess and make predictions
@@ -966,16 +965,15 @@ st.markdown("Sube múltiples imágenes de ultrasonido de mama para clasificarlas
 
 # Cargar el modelo al inicio
 @st.cache_resource
-def get_model():
+def get_active_model():
     return load_local_model()
 
-model = get_model()
+model = get_active_model()
 
 # Sidebar para información del modelo
 with st.sidebar:
     st.header("📊 Información del Modelo")
     
-    # Mostrar ruta configurada
     st.info(f"""
     **Ruta del modelo:** 
     `{MODEL_PATH}`
@@ -998,28 +996,12 @@ with st.sidebar:
         st.error("⚠️ Modelo no cargado")
         st.markdown("""
         **Para solucionarlo:**
-        1. Verifica que el archivo existe
-        2. Cambia MODEL_PATH en el código
-        3. Reinicia la aplicación
+        1. Sube un nuevo modelo usando el file uploader
+        2. O especifica una ruta válida
+        3. O verifica la ruta por defecto en el código
         """)
     else:
         st.success("✅ Modelo operativo")
-
-# Mostrar estado del modelo
-if model is None:
-    st.error("❌ No se pudo cargar el modelo desde la ruta especificada")
-    st.info(f"📁 Ruta configurada: {MODEL_PATH}")
-    st.info("💡 Verifica que el archivo existe y la ruta sea correcta")
-    st.markdown("### 🔧 Posibles soluciones:")
-    st.markdown("""
-    1. **Verifica la ruta**: Asegúrate de que el archivo existe en la ubicación especificada
-    2. **Usa barras normales**: Cambia `D:\Empresa\...` por `D:/Empresa/...` o usa raw string `r"D:\Empresa\..."`
-    3. **Permisos**: Verifica que tienes permisos de lectura en esa carpeta
-    4. **Modelo válido**: Asegúrate de que el archivo .h5 no esté corrupto
-    """)
-else:
-    st.success("✅ Modelo cargado correctamente y listo para usar")
-    st.info(f"📁 Modelo cargado desde: {MODEL_PATH}")
 
 # File uploader for multiple files
 uploaded_files = st.file_uploader(
@@ -1229,19 +1211,35 @@ else:
     # Instructions
     with st.expander("📋 Instrucciones de uso"):
         st.markdown("""
-        1. **Carga el modelo**: En la barra lateral, selecciona "Cargar archivo local" y sube tu archivo .h5, o usa "Usar ruta específica" para indicar la ubicación del modelo
-        2. **Selecciona las imágenes**: Haz clic en "Browse files" y selecciona múltiples imágenes de ultrasonido de mama
-        3. **Formatos soportados**: JPG, JPEG, PNG
-        4. **Naming convention para diagnóstico automático**:
+        ## 🧠 Carga del Modelo
+        
+        **Opción 1 - Subir archivo (Recomendado):**
+        1. Ve a la barra lateral → "🔄 Cargar Nuevo Modelo"
+        2. Usa "📁 Subir archivo de modelo (.h5)" - **Sin límite de tamaño**
+        3. Haz clic en "🚀 Cargar Modelo Subido"
+        
+        **Opción 2 - Especificar ruta:**
+        1. Ve a la barra lateral → "🗂️ Ruta del modelo"
+        2. Ingresa la ruta completa de tu modelo
+        3. Haz clic en "🔗 Cargar desde Ruta"
+        
+        **Para cambiar de modelo:**
+        - Usa "🧹 Limpiar Cache y Resetear" y carga un nuevo modelo
+        
+        ## 📸 Procesamiento de Imágenes
+        
+        1. **Selecciona las imágenes**: Haz clic en "Browse files" y selecciona múltiples imágenes de ultrasonido de mama
+        2. **Formatos soportados**: JPG, JPEG, PNG
+        3. **Naming convention para diagnóstico automático**:
            - Para casos **malignos**: incluye palabras como 'maligno', 'malignant', 'cancer', 'malo' en el nombre
            - Para casos **benignos**: incluye palabras como 'benigno', 'benign', 'bueno', 'ben' en el nombre  
            - Para casos **normales**: incluye palabras como 'normal', 'norm', 'sano', 'healthy' en el nombre
            - Ejemplo: `imagen_maligno_001.jpg`, `paciente_benigno_xyz.png`, `caso_normal_123.jpg`
-        5. **Procesa**: Haz clic en "Procesar todas las imágenes"
-        6. **Revisa los resultados**: Ve los resultados con métricas calculadas automáticamente
-        7. **Descarga el reporte**: Usa el botón "Descargar Reporte CSV"
+        4. **Procesa**: Haz clic en "Procesar todas las imágenes"
+        5. **Revisa los resultados**: Ve los resultados con métricas calculadas automáticamente
+        6. **Descarga el reporte**: Usa el botón "Descargar Reporte CSV"
         
-        **Información del reporte CSV:**
+        ## 📊 Información del reporte CSV:
         - `Nombre_Archivo`: Nombre del archivo de imagen
         - `Prediccion`: Clasificación predicha por el modelo (Benign, Malignant, Normal)
         - `Diagnostico`: Diagnóstico real extraído del nombre del archivo
@@ -1250,7 +1248,7 @@ else:
         - `Prob_Benign/Malignant/Normal`: Probabilidades para cada clase
         - `Fecha_Procesamiento`: Fecha y hora del análisis
         
-        **Métricas calculadas automáticamente:**
+        ## 🎯 Métricas calculadas automáticamente:
         - **VP (Verdaderos Positivos)**: Casos malignos correctamente identificados
         - **VN (Verdaderos Negativos)**: Casos no malignos correctamente identificados  
         - **FP (Falsos Positivos)**: Casos predecidos como malignos pero que no lo son
@@ -1268,9 +1266,10 @@ else:
     
     **💡 Tip**: Asegúrate de nombrar tus archivos correctamente para obtener métricas precisas.
     
-    **🚀 Ventajas del modelo local:**
-    - ⚡ Carga instantánea (sin descargas)
-    - 🔒 Mayor privacidad (procesamiento local)
-    - 🏃‍♂️ Análisis más rápido
-    - 📱 Funciona sin conexión a internet
+    **🚀 Nuevas funcionalidades:**
+    - 📁 **Carga de modelos sin límite de tamaño**: Sube archivos .h5 de cualquier tamaño
+    - 🔄 **Cambio dinámico de modelos**: Cambia entre diferentes modelos sin reiniciar
+    - 🧹 **Reseteo completo**: Limpia cache y permite cargar un modelo completamente nuevo
+    - 🗂️ **Múltiples opciones de carga**: File uploader o ruta personalizada
+    - ⚡ **Procesamiento local**: Todo funciona offline, sin límites de internet
     """)
