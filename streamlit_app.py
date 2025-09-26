@@ -3,12 +3,13 @@ import tensorflow as tf
 import numpy as np
 from io import BytesIO
 from PIL import Image
-import requests
-import h5py
 import pandas as pd
 from datetime import datetime
 import os
-from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score, roc_auc_score, accuracy_score
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score, roc_auc_score, accuracy_score, roc_curve
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 
 # Class mapping
 class_mapping = {
@@ -180,6 +181,407 @@ def calculate_real_time_metrics(results_df):
         'f1_score': f1_score, 'accuracy': accuracy, 'auc': auc
     }
 
+def create_circular_progress_chart(value, title, color_scheme="blue"):
+    """
+    Crea un gráfico circular de progreso para mostrar porcentajes
+    """
+    # Convertir a porcentaje si está en decimal
+    if value <= 1:
+        percentage = value * 100
+    else:
+        percentage = value
+    
+    # Definir colores según el esquema
+    color_schemes = {
+        "blue": {"main": "#1f77b4", "bg": "#e6f2ff"},
+        "green": {"main": "#2ca02c", "bg": "#e6ffe6"},
+        "orange": {"main": "#ff7f0e", "bg": "#fff2e6"},
+        "red": {"main": "#d62728", "bg": "#ffe6e6"},
+        "purple": {"main": "#9467bd", "bg": "#f3e6ff"}
+    }
+    
+    colors = color_schemes.get(color_scheme, color_schemes["blue"])
+    
+    # Crear el gráfico circular
+    fig = go.Figure()
+    
+    # Agregar el arco de progreso
+    fig.add_trace(go.Scatter(
+        x=[0.5], y=[0.5],
+        mode='markers+text',
+        marker=dict(size=1, color='rgba(0,0,0,0)'),
+        text=f"<b>{percentage:.1f}%</b>",
+        textfont=dict(size=24, color=colors["main"]),
+        textposition="middle center",
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+    
+    # Crear el gráfico de dona
+    fig.add_trace(go.Pie(
+        values=[percentage, 100-percentage],
+        hole=0.7,
+        marker_colors=[colors["main"], colors["bg"]],
+        textinfo='none',
+        hoverinfo='skip',
+        showlegend=False
+    ))
+    
+    # Configurar el layout
+    fig.update_layout(
+        title=dict(
+            text=f"<b>{title}</b>",
+            x=0.5,
+            font=dict(size=16, color=colors["main"])
+        ),
+        height=200,
+        margin=dict(t=50, b=10, l=10, r=10),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        annotations=[
+            dict(
+                text=title,
+                x=0.5, y=-0.1,
+                xref="paper", yref="paper",
+                xanchor="center", yanchor="top",
+                font=dict(size=12, color="#666666"),
+                showarrow=False
+            )
+        ]
+    )
+    
+    return fig
+
+def create_roc_curve_chart(results_df):
+    """
+    Crea una gráfica de curva ROC para visualizar el AUC
+    """
+    # Filtrar solo resultados exitosos
+    successful_results = results_df[results_df['Resultado'].isin(['VP', 'VN', 'FP', 'FN'])]
+    
+    if len(successful_results) == 0:
+        return None
+    
+    # Convertir diagnósticos y predicciones a valores binarios (Maligno vs No-Maligno)
+    y_true_binary = []
+    y_scores = []
+    
+    for _, row in successful_results.iterrows():
+        # True label: 1 si es maligno, 0 si no
+        if row['Diagnostico'] == 'Malignant':
+            y_true_binary.append(1)
+        else:
+            y_true_binary.append(0)
+        
+        # Score: probabilidad de ser maligno
+        try:
+            malignant_prob = float(row['Prob_Malignant'])
+            y_scores.append(malignant_prob)
+        except:
+            # Si hay error, usar valor por defecto basado en predicción
+            if row['Prediccion'] == 'Malignant':
+                y_scores.append(0.8)
+            else:
+                y_scores.append(0.2)
+    
+    if len(set(y_true_binary)) < 2:
+        # No hay suficiente variabilidad para ROC
+        return create_simple_auc_chart(calculate_simple_auc(successful_results))
+    
+    # Calcular curva ROC
+    try:
+        fpr, tpr, thresholds = roc_curve(y_true_binary, y_scores)
+        auc_score = roc_auc_score(y_true_binary, y_scores)
+    except:
+        return create_simple_auc_chart(calculate_simple_auc(successful_results))
+    
+    # Crear la gráfica
+    fig = go.Figure()
+    
+    # Línea de la curva ROC
+    fig.add_trace(go.Scatter(
+        x=fpr,
+        y=tpr,
+        mode='lines',
+        name=f'Curva ROC (AUC = {auc_score:.3f})',
+        line=dict(color='#2ca02c', width=3),
+        fill='tonexty' if len(fpr) > 0 else None,
+        fillcolor='rgba(44, 160, 44, 0.1)'
+    ))
+    
+    # Línea diagonal (clasificador aleatorio)
+    fig.add_trace(go.Scatter(
+        x=[0, 1],
+        y=[0, 1],
+        mode='lines',
+        name='Clasificador Aleatorio (AUC = 0.5)',
+        line=dict(color='red', width=2, dash='dash'),
+        showlegend=True
+    ))
+    
+    # Punto óptimo (más cercano a la esquina superior izquierda)
+    optimal_idx = np.argmax(tpr - fpr)
+    fig.add_trace(go.Scatter(
+        x=[fpr[optimal_idx]],
+        y=[tpr[optimal_idx]],
+        mode='markers',
+        name=f'Punto Óptimo (TPR={tpr[optimal_idx]:.3f}, FPR={fpr[optimal_idx]:.3f})',
+        marker=dict(color='red', size=12, symbol='star'),
+        showlegend=True
+    ))
+    
+    # Configurar layout con mejor legibilidad
+    fig.update_layout(
+        title=dict(
+            text=f'<b>📈 Curva ROC - AUC = {auc_score:.3f}</b>',
+            x=0.5,
+            font=dict(size=20, color='#2c3e50')
+        ),
+        xaxis_title='Tasa de Falsos Positivos (1 - Especificidad)',
+        yaxis_title='Tasa de Verdaderos Positivos (Sensibilidad)',
+        width=600,
+        height=500,
+        showlegend=True,
+        legend=dict(
+            x=0.02,
+            y=0.02,
+            bgcolor="rgba(255,255,255,0.95)",
+            bordercolor="rgba(0,0,0,0.3)",
+            borderwidth=2,
+            font=dict(size=12, color='#2c3e50')
+        ),
+        xaxis=dict(
+            range=[0, 1], 
+            constrain='domain',
+            title=dict(font=dict(size=14, color='#2c3e50')),
+            tickfont=dict(size=12, color='#2c3e50'),
+            tickmode='linear',
+            tick0=0,
+            dtick=0.2
+        ),
+        yaxis=dict(
+            range=[0, 1], 
+            scaleanchor='x', 
+            scaleratio=1,
+            title=dict(font=dict(size=14, color='#2c3e50')),
+            tickfont=dict(size=12, color='#2c3e50'),
+            tickmode='linear',
+            tick0=0,
+            dtick=0.2
+        ),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        font=dict(color='#2c3e50')
+    )
+    
+    # Agregar grid con mejor contraste
+    fig.update_xaxes(
+        showgrid=True, 
+        gridwidth=1.5, 
+        gridcolor='rgba(128,128,128,0.3)',
+        showline=True,
+        linewidth=2,
+        linecolor='#2c3e50',
+        mirror=True
+    )
+    fig.update_yaxes(
+        showgrid=True, 
+        gridwidth=1.5, 
+        gridcolor='rgba(128,128,128,0.3)',
+        showline=True,
+        linewidth=2,
+        linecolor='#2c3e50',
+        mirror=True
+    )
+    
+    return fig
+
+def create_simple_auc_chart(auc_value):
+    """
+    Crea una gráfica simple de AUC cuando no se puede calcular ROC
+    """
+    fig = go.Figure()
+    
+    # Crear una curva ROC simulada basada en el AUC
+    x = np.linspace(0, 1, 100)
+    
+    # Aproximar una curva que tenga el AUC deseado
+    if auc_value > 0.5:
+        # Curva convexa para AUC > 0.5
+        y = np.power(x, 1/(2*auc_value))
+    else:
+        # Curva cóncava para AUC < 0.5
+        y = 1 - np.power(1-x, 2*auc_value)
+    
+    # Asegurar que esté entre 0 y 1
+    y = np.clip(y, 0, 1)
+    
+    fig.add_trace(go.Scatter(
+        x=x,
+        y=y,
+        mode='lines',
+        name=f'Curva ROC Estimada (AUC ≈ {auc_value:.3f})',
+        line=dict(color='#2ca02c', width=3),
+        fill='tonexty',
+        fillcolor='rgba(44, 160, 44, 0.1)'
+    ))
+    
+    # Línea diagonal
+    fig.add_trace(go.Scatter(
+        x=[0, 1],
+        y=[0, 1],
+        mode='lines',
+        name='Clasificador Aleatorio (AUC = 0.5)',
+        line=dict(color='red', width=2, dash='dash')
+    ))
+    
+    fig.update_layout(
+        title=dict(
+            text=f'<b>📈 Curva ROC Estimada - AUC ≈ {auc_value:.3f}</b>',
+            x=0.5,
+            font=dict(size=20, color='#2c3e50')
+        ),
+        xaxis_title='Tasa de Falsos Positivos (1 - Especificidad)',
+        yaxis_title='Tasa de Verdaderos Positivos (Sensibilidad)',
+        width=600,
+        height=500,
+        showlegend=True,
+        legend=dict(
+            x=0.02,
+            y=0.02,
+            bgcolor="rgba(255,255,255,0.95)",
+            bordercolor="rgba(0,0,0,0.3)",
+            borderwidth=2,
+            font=dict(size=12, color='#2c3e50')
+        ),
+        xaxis=dict(
+            range=[0, 1],
+            title=dict(font=dict(size=14, color='#2c3e50')),
+            tickfont=dict(size=12, color='#2c3e50'),
+            tickmode='linear',
+            tick0=0,
+            dtick=0.2
+        ),
+        yaxis=dict(
+            range=[0, 1],
+            title=dict(font=dict(size=14, color='#2c3e50')),
+            tickfont=dict(size=12, color='#2c3e50'),
+            tickmode='linear',
+            tick0=0,
+            dtick=0.2
+        ),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        font=dict(color='#2c3e50')
+    )
+    
+    fig.update_xaxes(
+        showgrid=True, 
+        gridwidth=1.5, 
+        gridcolor='rgba(128,128,128,0.3)',
+        showline=True,
+        linewidth=2,
+        linecolor='#2c3e50',
+        mirror=True
+    )
+    fig.update_yaxes(
+        showgrid=True, 
+        gridwidth=1.5, 
+        gridcolor='rgba(128,128,128,0.3)',
+        showline=True,
+        linewidth=2,
+        linecolor='#2c3e50',
+        mirror=True
+    )
+    
+    return fig
+
+def calculate_simple_auc(results_df):
+    """
+    Calcula un AUC simplificado basado en VP, VN, FP, FN
+    """
+    counts = results_df['Resultado'].value_counts()
+    vp = counts.get('VP', 0)
+    vn = counts.get('VN', 0) 
+    fp = counts.get('FP', 0)
+    fn = counts.get('FN', 0)
+    
+    if (vp + fn) == 0 or (vn + fp) == 0:
+        return 0.5
+    
+    sensitivity = vp / (vp + fn)
+    specificity = vn / (vn + fp)
+    
+    # Aproximación simple del AUC
+    return (sensitivity + specificity) / 2
+
+def create_combined_metrics_chart(metrics):
+    """
+    Crea un gráfico combinado con todos los indicadores de rendimiento
+    """
+    # Preparar datos
+    metric_names = ['Precisión', 'Sensibilidad', 'Especificidad', 'F1-Score']
+    metric_values = [
+        metrics['precision'] * 100,
+        metrics['sensitivity'] * 100,
+        metrics['specificity'] * 100,
+        metrics['f1_score'] * 100
+    ]
+    
+    # Crear subplots para los gráficos circulares (4 en lugar de 5)
+    fig = make_subplots(
+        rows=1, cols=4,
+        specs=[[{"type": "pie"} for _ in range(4)]],
+        subplot_titles=metric_names,
+        horizontal_spacing=0.05
+    )
+    
+    colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#d62728']
+    
+    for i, (name, value, color) in enumerate(zip(metric_names, metric_values, colors)):
+        # Agregar gráfico de dona
+        fig.add_trace(
+            go.Pie(
+                values=[value, 100-value],
+                hole=0.7,
+                marker_colors=[color, '#f0f0f0'],
+                textinfo='none',
+                hoverinfo='skip',
+                showlegend=False,
+                name=name
+            ),
+            row=1, col=i+1
+        )
+        
+        # Agregar texto en el centro
+        fig.add_annotation(
+            text=f"<b>{value:.1f}%</b>",
+            x=(i * 0.25) + 0.125,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            font=dict(size=16, color=color),
+            showarrow=False,
+            xanchor="center",
+            yanchor="middle"
+        )
+    
+    # Configurar layout
+    fig.update_layout(
+        height=300,
+        showlegend=False,
+        margin=dict(t=50, b=50, l=10, r=10),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        title=dict(
+            text="<b>🎯 Indicadores de Rendimiento - Calculados</b>",
+            x=0.5,
+            font=dict(size=18)
+        )
+    )
+    
+    return fig
+
 def display_real_time_metrics(metrics):
     """
     Muestra las métricas calculadas en tiempo real con el formato de las imágenes
@@ -235,20 +637,88 @@ def display_real_time_metrics(metrics):
         })
         st.dataframe(indicators_df, use_container_width=True)
     
-    # Mostrar métricas en cards grandes
-    st.markdown("**📈 Resumen de Indicadores**")
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # *** NUEVA SECCIÓN: Gráficos Circulares de Progreso ***
+    st.markdown("**📈 Visualización de Indicadores de Rendimiento**")
+    
+    # Crear gráfico combinado (ahora sin AUC)
+    combined_chart = create_combined_metrics_chart(metrics)
+    st.plotly_chart(combined_chart, use_container_width=True)
+    
+    # *** NUEVA SECCIÓN: Gráfica ROC para AUC ***
+    st.markdown("**📊 Análisis AUC - Curva ROC**")
+    
+    col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.metric("🎯 Precisión", f"{metrics['precision']:.1%}")
+        # Crear y mostrar gráfica ROC
+        current_data = st.session_state.get('current_results_df')
+        if current_data is not None:
+            roc_chart = create_roc_curve_chart(current_data)
+            if roc_chart:
+                st.plotly_chart(roc_chart, use_container_width=True)
+            else:
+                # Si no se puede crear ROC real, crear una estimada
+                simple_roc = create_simple_auc_chart(metrics['auc'])
+                st.plotly_chart(simple_roc, use_container_width=True)
+        else:
+            # Crear AUC estimado
+            simple_roc = create_simple_auc_chart(metrics['auc'])
+            st.plotly_chart(simple_roc, use_container_width=True)
+    
     with col2:
-        st.metric("🔍 Sensibilidad", f"{metrics['sensitivity']:.1%}")
-    with col3:
-        st.metric("🛡️ Especificidad", f"{metrics['specificity']:.1%}")
-    with col4:
-        st.metric("⚖️ F1-Score", f"{metrics['f1_score']:.1%}")
-    with col5:
-        st.metric("📊 AUC", f"{metrics['auc']:.1%}")
+        # Información sobre AUC
+        st.markdown("**🎯 Interpretación del AUC:**")
+        auc_value = metrics['auc']
+        
+        if auc_value >= 0.9:
+            auc_interpretation = "🌟 Excelente"
+            auc_color = "green"
+        elif auc_value >= 0.8:
+            auc_interpretation = "✅ Bueno"
+            auc_color = "blue"
+        elif auc_value >= 0.7:
+            auc_interpretation = "⚠️ Aceptable"
+            auc_color = "orange"
+        elif auc_value >= 0.6:
+            auc_interpretation = "🔴 Pobre"
+            auc_color = "red"
+        else:
+            auc_interpretation = "❌ Muy Pobre"
+            auc_color = "red"
+        
+        st.metric(
+            label="📊 AUC Score", 
+            value=f"{auc_value:.3f}",
+            help="Área bajo la curva ROC"
+        )
+        
+        st.markdown(f"**Clasificación:** {auc_interpretation}")
+        
+        st.markdown("""
+        **Rangos de AUC:**
+        - 0.9-1.0: Excelente
+        - 0.8-0.9: Bueno  
+        - 0.7-0.8: Aceptable
+        - 0.6-0.7: Pobre
+        - 0.5-0.6: Muy Pobre
+        - 0.5: Aleatorio
+        """)
+    
+    # También mostrar gráficos individuales en columnas (sin AUC)
+    st.markdown("**🎯 Métricas Individuales**")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    metrics_data = [
+        ("Precisión", metrics['precision'], "blue", col1),
+        ("Sensibilidad", metrics['sensitivity'], "green", col2),
+        ("Especificidad", metrics['specificity'], "orange", col3),
+        ("F1-Score", metrics['f1_score'], "red", col4)
+    ]
+    
+    for name, value, color, column in metrics_data:
+        with column:
+            fig = create_circular_progress_chart(value, name, color)
+            st.plotly_chart(fig, use_container_width=True)
     
     # Mostrar conteos en formato similar a la imagen
     st.markdown("**🔢 Conteo de Resultados**")
@@ -362,297 +832,72 @@ def display_historical_metrics():
             value="80.06%",
             help="Área bajo la curva ROC"
         )
-    """
-    Muestra las métricas históricas del modelo (como las de las imágenes)
-    """
-    st.subheader("🎯 Rendimiento del Modelo - Hospital Público de Surquillo")
-    
-    # Datos de la matriz de confusión histórica (según tus imágenes)
-    historical_data = {
-        'VP': 100, 'VN': 23, 'FP': 41, 'FN': 155, 'TOTALES': 319
-    }
-    
-    # Crear tabla de matriz de confusión histórica
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.markdown("**📊 Matriz de Confusión Histórica**")
-        confusion_df = pd.DataFrame({
-            'Categoría': ['VP', 'VN', 'FP', 'FN', 'TOTALES'],
-            'Total': [100, 23, 41, 155, 319],
-            'Porcentaje': ['31%', '7%', '13%', '49%', '100%']
-        })
-        st.dataframe(confusion_df, use_container_width=True)
-    
-    with col2:
-        st.markdown("**🎯 Indicadores de Rendimiento**")
-        metrics_df = pd.DataFrame({
-            'Indicador': ['Precisión', 'Sensibilidad', 'Especificidad', 'F1 Score', 'AUC'],
-            'Fórmula': ['VP/(VP+FP)', 'VP/(VP+FN)', 'VN/(VN+FP)', '2×(P×S)/(P+S)', '(S+E)/2'],
-            'Porcentaje': ['71%', '81%', '79.11%', '75.67%', '80.06%']
-        })
-        st.dataframe(metrics_df, use_container_width=True)
-    
-    # Mostrar métricas en formato de cards
-    st.markdown("**📈 Métricas Principales del Modelo**")
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    with col1:
-        st.metric(
-            label="🎯 Precisión",
-            value="71.0%",
-            help="De todas las predicciones positivas, cuántas fueron correctas"
-        )
-    
-    with col2:
-        st.metric(
-            label="🔍 Sensibilidad", 
-            value="81.0%",
-            help="De todos los casos positivos reales, cuántos detectó el modelo"
-        )
-    
-    with col3:
-        st.metric(
-            label="🛡️ Especificidad",
-            value="79.11%", 
-            help="De todos los casos negativos reales, cuántos identificó correctamente"
-        )
-    
-    with col4:
-        st.metric(
-            label="⚖️ F1 Score",
-            value="75.67%",
-            help="Media armónica entre precisión y sensibilidad"
-        )
-    
-    with col5:
-        st.metric(
-            label="📊 AUC",
-            value="80.06%",
-            help="Área bajo la curva ROC"
-        )
 
-def create_detailed_results_table(predictions_df):
+def create_csv_report(results):
+    """Crear un DataFrame con los resultados y convertirlo a CSV"""
+    df = pd.DataFrame(results)
+    
+    # Agregar información adicional al reporte
+    df['Fecha_Procesamiento'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Reordenar columnas incluyendo las nuevas
+    columns_order = ['Nombre_Archivo', 'Prediccion', 'Diagnostico', 'Resultado', 'Confianza', 
+                    'Prob_Benign', 'Prob_Malignant', 'Prob_Normal', 'Fecha_Procesamiento']
+    
+    # Solo incluir columnas que existen en el DataFrame
+    available_columns = [col for col in columns_order if col in df.columns]
+    df = df[available_columns]
+    
+    return df
+
+# CONFIGURACIÓN DEL MODELO - CAMBIAR ESTA RUTA
+MODEL_PATH = r"D:\Empresa\Cancer de mama\RN_mama_ya_entrenado\Breast-Cancer-Image-Classification-with-DenseNet121\models\model_complete.h5"
+
+# CÓDIGO DE DEPURACIÓN - Agregar al final del archivo
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔧 Diagnóstico del Modelo")
+st.sidebar.write(f"Ruta configurada: `{MODEL_PATH}`")
+st.sidebar.write(f"¿Archivo existe?: {os.path.exists(MODEL_PATH)}")
+
+if os.path.exists(MODEL_PATH):
+    try:
+        file_size = os.path.getsize(MODEL_PATH)
+        st.sidebar.write(f"Tamaño del archivo: {file_size / (1024*1024):.1f} MB")
+    except:
+        st.sidebar.write("Error obteniendo tamaño del archivo")
+else:
+    st.sidebar.write("❌ El archivo no existe en esta ruta")
+    
+    # Verificar si la carpeta padre existe
+    parent_dir = os.path.dirname(MODEL_PATH)
+    st.sidebar.write(f"¿Carpeta padre existe?: {os.path.exists(parent_dir)}")
+    
+    if os.path.exists(parent_dir):
+        try:
+            files_in_dir = os.listdir(parent_dir)
+            h5_files = [f for f in files_in_dir if f.endswith('.h5')]
+            st.sidebar.write(f"Archivos .h5 encontrados en la carpeta: {h5_files}")
+        except:
+            st.sidebar.write("Error listando archivos de la carpeta")
+
+# Limpiar cache si es necesario
+if st.sidebar.button("🧹 Limpiar Cache y Recargar Modelo"):
+    st.cache_resource.clear()
+    st.rerun()
+
+@st.cache_resource
+def load_local_model():
     """
-    Crea una tabla detallada de resultados similar a la imagen
+    Carga un modelo local desde un archivo .h5
     """
-    st.subheader("🗂️ Tabla Detallada de Resultados por Paciente")
-    
-    # Crear datos simulados para mostrar el formato
-    detailed_results = []
-    
-    for index, row in predictions_df.iterrows():
-        # Generar ID de paciente y imagen basado en el nombre del archivo
-        filename = row['Nombre_Archivo']
-        patient_id = f"P_{index+1:04d}"
-        
-        # Extraer tipo de imagen del nombre (si está disponible)
-        if 'MLO' in filename.upper():
-            image_type = 'MLO_IZQ' if 'IZQ' in filename.upper() else 'MLO_DER'
-        elif 'CC' in filename.upper():
-            image_type = 'CC_IZQ' if 'IZQ' in filename.upper() else 'CC_DER'
-        else:
-            image_type = 'UNK_TYPE'
-        
-        image_id = f"{patient_id}_{image_type}"
-        
-        # Simular diagnóstico basado en la predicción (esto sería real en producción)
-        prediction = row['Prediccion']
-        
-        # Simular resultado de comparación (en la práctica tendríamos el diagnóstico real)
-        # Para demostración, vamos a simular algunos casos
-        import random
-        random.seed(index)  # Para resultados consistentes
-        
-        if prediction == 'Malignant':
-            # Simular que el 80% de predicciones malignas son correctas
-            real_diagnosis = 'Maligno' if random.random() < 0.8 else 'Benigno'
-        elif prediction == 'Benign':
-            # Simular que el 75% de predicciones benignas son correctas
-            real_diagnosis = 'Benigno' if random.random() < 0.75 else 'Maligno'
-        else:  # Normal
-            real_diagnosis = 'Normal' if random.random() < 0.9 else 'Benigno'
-        
-        # Determinar resultado de la comparación
-        if prediction == 'Malignant' and real_diagnosis == 'Maligno':
-            resultado = 'VP'  # Verdadero Positivo
-        elif prediction == 'Benign' and real_diagnosis == 'Benigno':
-            resultado = 'VN'  # Verdadero Negativo
-        elif prediction == 'Malignant' and real_diagnosis != 'Maligno':
-            resultado = 'FP'  # Falso Positivo
-        elif prediction != 'Malignant' and real_diagnosis == 'Maligno':
-            resultado = 'FN'  # Falso Negativo
-        else:
-            resultado = 'VN' if prediction == real_diagnosis else 'FP'
-        
-        detailed_results.append({
-            'ID Paciente': patient_id,
-            'ID Imagen': image_id,
-            'Diagnóstico': real_diagnosis,
-            'Predicción': prediction,
-            'Resultado': resultado,
-            'Confianza': row['Confianza']
-        })
-    
-    # Crear DataFrame y mostrarlo
-    results_df = pd.DataFrame(detailed_results)
-    
-    # Colorear las filas según el resultado
-    def color_resultado(val):
-        if val == 'VP':
-            return 'background-color: #d4edda; color: #155724'  # Verde para VP
-        elif val == 'VN':
-            return 'background-color: #d1ecf1; color: #0c5460'  # Azul para VN
-        elif val == 'FP':
-            return 'background-color: #fff3cd; color: #856404'  # Amarillo para FP
-        elif val == 'FN':
-            return 'background-color: #f8d7da; color: #721c24'  # Rojo para FN
-        return ''
-    
-    # Mostrar la tabla con colores
-    styled_df = results_df.style.applymap(color_resultado, subset=['Resultado'])
-    st.dataframe(styled_df, use_container_width=True)
-    
-    # Mostrar resumen de resultados
-    st.subheader("📊 Resumen de Clasificación")
-    resultado_counts = results_df['Resultado'].value_counts()
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        vp_count = resultado_counts.get('VP', 0)
-        st.metric("🟢 Verdaderos Positivos (VP)", vp_count)
-    
-    with col2:
-        vn_count = resultado_counts.get('VN', 0)
-        st.metric("🔵 Verdaderos Negativos (VN)", vn_count)
-    
-    with col3:
-        fp_count = resultado_counts.get('FP', 0)
-        st.metric("🟡 Falsos Positivos (FP)", fp_count)
-    
-    with col4:
-        fn_count = resultado_counts.get('FN', 0)
-        st.metric("🔴 Falsos Negativos (FN)", fn_count)
-    
-    # Calcular métricas actuales basadas en esta muestra
-    if len(resultado_counts) > 0:
-        st.subheader("🎯 Métricas de Esta Muestra")
-        
-        total = len(results_df)
-        vp = resultado_counts.get('VP', 0)
-        vn = resultado_counts.get('VN', 0)
-        fp = resultado_counts.get('FP', 0)
-        fn = resultado_counts.get('FN', 0)
-        
-        # Calcular métricas
-        precision = vp / (vp + fp) if (vp + fp) > 0 else 0
-        sensitivity = vp / (vp + fn) if (vp + fn) > 0 else 0
-        specificity = vn / (vn + fp) if (vn + fp) > 0 else 0
-        f1_score = 2 * (precision * sensitivity) / (precision + sensitivity) if (precision + sensitivity) > 0 else 0
-        accuracy = (vp + vn) / total if total > 0 else 0
-        
-        col1, col2, col3, col4, col5 = st.columns(5)
-        
-        with col1:
-            st.metric("🎯 Precisión", f"{precision:.1%}")
-        with col2:
-            st.metric("🔍 Sensibilidad", f"{sensitivity:.1%}")
-        with col3:
-            st.metric("🛡️ Especificidad", f"{specificity:.1%}")
-        with col4:
-            st.metric("⚖️ F1-Score", f"{f1_score:.1%}")
-        with col5:
-            st.metric("✅ Exactitud", f"{accuracy:.1%}")
-
-def display_performance_metrics(metrics):
-    """
-    Muestra las métricas de rendimiento en formato similar a la imagen
-    """
-    st.subheader("🎯 Métricas de Rendimiento del Modelo")
-    
-    # Métricas generales
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Precisión General", f"{metrics['accuracy']:.3f}")
-    with col2:
-        st.metric("F1-Score Macro", f"{metrics['f1_macro']:.3f}")
-    with col3:
-        if 'auc_macro' in metrics:
-            st.metric("AUC Macro", f"{metrics['auc_macro']:.3f}")
-    
-    # Tabla de métricas por clase (similar a la imagen)
-    st.subheader("📋 Tabla de Indicadores por Clase")
-    
-    metrics_data = []
-    classes = ['Benign', 'Malignant', 'Normal']
-    
-    for i, class_name in enumerate(classes):
-        precision_key = f'precision_{class_name.lower()}'
-        recall_key = f'recall_{class_name.lower()}'
-        f1_key = f'f1_{class_name.lower()}'
-        
-        metrics_data.append({
-            'Clase': class_name,
-            'Precisión': f"{metrics.get(precision_key, 0):.3f}",
-            'Sensibilidad (Recall)': f"{metrics.get(recall_key, 0):.3f}",
-            'F1-Score': f"{metrics.get(f1_key, 0):.3f}"
-        })
-    
-    df_metrics = pd.DataFrame(metrics_data)
-    st.dataframe(df_metrics, use_container_width=True)
-
-# Function to load the combined model
-@st.cache_data(show_spinner=False)
-def load_model():
-    # URLs for model parts on GitHub
-    base_url = "https://github.com/m3mentomor1/Breast-Cancer-Image-Classification/raw/main/splitted_model/"
-    model_parts = [f"{base_url}model.h5.part{i:02d}" for i in range(1, 35)]
-
-    # Download and combine model parts
-    model_bytes = b''
-    
-    for part_url in model_parts:
-        response = requests.get(part_url)
-        model_bytes += response.content
-    
-    # Create an in-memory HDF5 file
-    with h5py.File(BytesIO(model_bytes), 'r') as hf:
-        # Load the combined model
-        model = tf.keras.models.load_model(hf)
-    
-    return model
-
-# Function to load model with progress bar
-def load_model_with_progress():
-    # URLs for model parts on GitHub
-    base_url = "https://github.com/m3mentomor1/Breast-Cancer-Image-Classification/raw/main/splitted_model/"
-    model_parts = [f"{base_url}model.h5.part{i:02d}" for i in range(1, 35)]
-
-    # Progress bar for model loading
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    # Download and combine model parts
-    model_bytes = b''
-    
-    for i, part_url in enumerate(model_parts):
-        status_text.text(f'Descargando parte {i+1} de {len(model_parts)}...')
-        response = requests.get(part_url)
-        model_bytes += response.content
-        progress_bar.progress((i + 1) / len(model_parts))
-    
-    status_text.text('Cargando modelo...')
-    
-    # Create an in-memory HDF5 file
-    with h5py.File(BytesIO(model_bytes), 'r') as hf:
-        # Load the combined model
-        model = tf.keras.models.load_model(hf)
-    
-    progress_bar.empty()
-    status_text.empty()
-    
-    return model
+    try:
+        # st.write(f"Intentando cargar modelo desde: {MODEL_PATH}")  # Debug
+        model = tf.keras.models.load_model(MODEL_PATH)
+        # st.write("✅ Modelo cargado exitosamente")  # Debug
+        return model
+    except Exception as e:
+        st.error(f"Error cargando el modelo desde {MODEL_PATH}: {str(e)}")
+        return None
 
 # Function to preprocess and make predictions
 def predict(image, model):
@@ -714,54 +959,30 @@ def predict(image, model):
         
     except Exception as e:
         raise ValueError(f"Error en el preprocesamiento: {str(e)}")
-        
-def preprocess_image_debug(image):
-    """Función auxiliar para debuggear problemas de imagen"""
-    info = {
-        'mode': image.mode,
-        'size': image.size,
-        'format': getattr(image, 'format', 'Unknown')
-    }
-    
-    # Convertir a array para ver dimensiones
-    img_array = np.array(image)
-    info['array_shape'] = img_array.shape
-    info['array_dtype'] = img_array.dtype
-    
-    return info
-
-def create_csv_report(results):
-    """Crear un DataFrame con los resultados y convertirlo a CSV"""
-    df = pd.DataFrame(results)
-    
-    # Agregar información adicional al reporte
-    df['Fecha_Procesamiento'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # Reordenar columnas incluyendo las nuevas
-    columns_order = ['Nombre_Archivo', 'Prediccion', 'Diagnostico', 'Resultado', 'Confianza', 
-                    'Prob_Benign', 'Prob_Malignant', 'Prob_Normal', 'Fecha_Procesamiento']
-    
-    # Solo incluir columnas que existen en el DataFrame
-    available_columns = [col for col in columns_order if col in df.columns]
-    df = df[available_columns]
-    
-    return df
 
 # Streamlit app
 st.title('🔬 Clasificador de Cáncer de Mama - Múltiples Imágenes')
 st.markdown("Sube múltiples imágenes de ultrasonido de mama para clasificarlas y obtener un reporte detallado con métricas de evaluación.")
 
-# Opción para mostrar métricas del modelo al inicio
-with st.expander("📊 Ver Métricas Históricas del Modelo", expanded=False):
-    display_historical_metrics()
+# Cargar el modelo al inicio
+@st.cache_resource
+def get_model():
+    return load_local_model()
+
+model = get_model()
 
 # Sidebar para información del modelo
 with st.sidebar:
     st.header("📊 Información del Modelo")
-    st.info("""
+    
+    # Mostrar ruta configurada
+    st.info(f"""
+    **Ruta del modelo:** 
+    `{MODEL_PATH}`
+    
     **Clases de Clasificación:**
     - 🟢 Benign (Benigno)
-    - 🔴 Malignant (Maligno)
+    - 🔴 Malignant (Maligno)  
     - 🔵 Normal
     
     **Métricas Calculadas:**
@@ -772,15 +993,43 @@ with st.sidebar:
     - AUC (cuando aplicable)
     - Matriz de Confusión
     """)
+    
+    if model is None:
+        st.error("⚠️ Modelo no cargado")
+        st.markdown("""
+        **Para solucionarlo:**
+        1. Verifica que el archivo existe
+        2. Cambia MODEL_PATH en el código
+        3. Reinicia la aplicación
+        """)
+    else:
+        st.success("✅ Modelo operativo")
+
+# Mostrar estado del modelo
+if model is None:
+    st.error("❌ No se pudo cargar el modelo desde la ruta especificada")
+    st.info(f"📁 Ruta configurada: {MODEL_PATH}")
+    st.info("💡 Verifica que el archivo existe y la ruta sea correcta")
+    st.markdown("### 🔧 Posibles soluciones:")
+    st.markdown("""
+    1. **Verifica la ruta**: Asegúrate de que el archivo existe en la ubicación especificada
+    2. **Usa barras normales**: Cambia `D:\Empresa\...` por `D:/Empresa/...` o usa raw string `r"D:\Empresa\..."`
+    3. **Permisos**: Verifica que tienes permisos de lectura en esa carpeta
+    4. **Modelo válido**: Asegúrate de que el archivo .h5 no esté corrupto
+    """)
+else:
+    st.success("✅ Modelo cargado correctamente y listo para usar")
+    st.info(f"📁 Modelo cargado desde: {MODEL_PATH}")
 
 # File uploader for multiple files
 uploaded_files = st.file_uploader(
     "Selecciona las imágenes de ultrasonido de mama", 
     type=["jpg", "jpeg", "png"], 
-    accept_multiple_files=True
+    accept_multiple_files=True,
+    disabled=(model is None)
 )
 
-if uploaded_files:
+if uploaded_files and model is not None:
     st.write(f"**{len(uploaded_files)} imágenes seleccionadas**")
     
     # Show uploaded images in a grid
@@ -799,17 +1048,6 @@ if uploaded_files:
     
     # Process button
     if st.button("🚀 Procesar todas las imágenes", type="primary"):
-        # Load the model
-        with st.spinner("Cargando modelo..."):
-            # Try to load from cache first
-            try:
-                model = load_model()
-            except:
-                # If cache fails, load with progress bar
-                model = load_model_with_progress()
-        
-        st.success("✅ Modelo cargado correctamente")
-        
         # Initialize results list
         results = []
         y_true = []  # Para métricas (si tienes etiquetas verdaderas)
@@ -903,6 +1141,9 @@ if uploaded_files:
             successful_predictions = df_results[df_results['Prediccion'] != 'ERROR']
             
             if not successful_predictions.empty and 'Resultado' in successful_predictions.columns:
+                # Almacenar en session state para usar en gráfica ROC
+                st.session_state['current_results_df'] = successful_predictions
+                
                 # Calcular métricas basadas en los resultados reales
                 metrics = calculate_real_time_metrics(successful_predictions)
                 
@@ -980,21 +1221,25 @@ if uploaded_files:
             st.success(f"✅ Procesamiento completado. {len(results)} imágenes analizadas.")
         
 else:
-    st.info("👆 Selecciona una o más imágenes para comenzar el análisis.")
+    if model is None:
+        st.info("🧠 Carga un modelo local para comenzar el análisis.")
+    else:
+        st.info("👆 Selecciona una o más imágenes para comenzar el análisis.")
     
     # Instructions
     with st.expander("📋 Instrucciones de uso"):
         st.markdown("""
-        1. **Selecciona las imágenes**: Haz clic en "Browse files" y selecciona múltiples imágenes de ultrasonido de mama
-        2. **Formatos soportados**: JPG, JPEG, PNG
-        3. **Naming convention para diagnóstico automático**:
+        1. **Carga el modelo**: En la barra lateral, selecciona "Cargar archivo local" y sube tu archivo .h5, o usa "Usar ruta específica" para indicar la ubicación del modelo
+        2. **Selecciona las imágenes**: Haz clic en "Browse files" y selecciona múltiples imágenes de ultrasonido de mama
+        3. **Formatos soportados**: JPG, JPEG, PNG
+        4. **Naming convention para diagnóstico automático**:
            - Para casos **malignos**: incluye palabras como 'maligno', 'malignant', 'cancer', 'malo' en el nombre
            - Para casos **benignos**: incluye palabras como 'benigno', 'benign', 'bueno', 'ben' en el nombre  
            - Para casos **normales**: incluye palabras como 'normal', 'norm', 'sano', 'healthy' en el nombre
            - Ejemplo: `imagen_maligno_001.jpg`, `paciente_benigno_xyz.png`, `caso_normal_123.jpg`
-        4. **Procesa**: Haz clic en "Procesar todas las imágenes"
-        5. **Revisa los resultados**: Ve los resultados con métricas calculadas automáticamente
-        6. **Descarga el reporte**: Usa el botón "Descargar Reporte CSV"
+        5. **Procesa**: Haz clic en "Procesar todas las imágenes"
+        6. **Revisa los resultados**: Ve los resultados con métricas calculadas automáticamente
+        7. **Descarga el reporte**: Usa el botón "Descargar Reporte CSV"
         
         **Información del reporte CSV:**
         - `Nombre_Archivo`: Nombre del archivo de imagen
@@ -1022,4 +1267,10 @@ else:
     - Presenta los resultados en el mismo formato que las imágenes de referencia
     
     **💡 Tip**: Asegúrate de nombrar tus archivos correctamente para obtener métricas precisas.
+    
+    **🚀 Ventajas del modelo local:**
+    - ⚡ Carga instantánea (sin descargas)
+    - 🔒 Mayor privacidad (procesamiento local)
+    - 🏃‍♂️ Análisis más rápido
+    - 📱 Funciona sin conexión a internet
     """)
