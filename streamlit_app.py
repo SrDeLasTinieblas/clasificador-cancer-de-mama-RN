@@ -10,6 +10,259 @@ from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+# Agregar estas importaciones al inicio del archivo
+import io
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
+import base64
+
+def create_excel_report(results):
+    """
+    Crear un reporte Excel con formato profesional y colores
+    """
+    # Crear DataFrame
+    df = pd.DataFrame(results)
+    df['Fecha_Procesamiento'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Reordenar columnas
+    columns_order = ['Nombre_Archivo', 'Prediccion', 'Diagnostico', 'Resultado', 'Confianza', 
+                    'Prob_Benign', 'Prob_Malignant', 'Prob_Normal', 'Fecha_Procesamiento']
+    available_columns = [col for col in columns_order if col in df.columns]
+    df = df[available_columns]
+    
+    # Crear workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Resultados Análisis"
+    
+    # Definir estilos
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True, size=12)
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    
+    # Colores para resultados
+    colors = {
+        'VP': PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid"),  # Verde claro
+        'VN': PatternFill(start_color="D1ECF1", end_color="D1ECF1", fill_type="solid"),  # Azul claro
+        'FP': PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid"),  # Amarillo claro
+        'FN': PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid"),  # Rojo claro
+        'ERROR': PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid")  # Gris claro
+    }
+    
+    # Fuentes para resultados
+    result_fonts = {
+        'VP': Font(color="155724", bold=True),  # Verde oscuro
+        'VN': Font(color="0C5460", bold=True),  # Azul oscuro
+        'FP': Font(color="856404", bold=True),  # Amarillo oscuro
+        'FN': Font(color="721C24", bold=True),  # Rojo oscuro
+        'ERROR': Font(color="6C757D", bold=True)  # Gris oscuro
+    }
+    
+    # Bordes
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Agregar encabezados
+    headers = df.columns.tolist()
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = header_alignment
+        cell.border = thin_border
+    
+    # Agregar datos
+    for row_num, row_data in enumerate(df.iterrows(), 2):
+        _, data = row_data
+        for col_num, value in enumerate(data, 1):
+            cell = ws.cell(row=row_num, column=col_num, value=value)
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            
+            # Aplicar colores según el resultado
+            if col_num == 4 and 'Resultado' in df.columns:  # Columna Resultado
+                result_value = str(value)
+                if result_value in colors:
+                    cell.fill = colors[result_value]
+                    cell.font = result_fonts[result_value]
+            
+            # Formato especial para probabilidades
+            if col_num in [6, 7, 8]:  # Columnas de probabilidades
+                try:
+                    prob_value = float(value)
+                    cell.value = f"{prob_value:.4f}"
+                    if prob_value > 0.7:
+                        cell.font = Font(color="155724", bold=True)  # Verde para alta confianza
+                    elif prob_value > 0.5:
+                        cell.font = Font(color="856404", bold=True)  # Amarillo para confianza media
+                except:
+                    pass
+            
+            # Formato para confianza
+            if col_num == 5:  # Columna Confianza
+                try:
+                    conf_value = float(value)
+                    cell.value = f"{conf_value:.4f}"
+                    if conf_value > 0.8:
+                        cell.font = Font(color="155724", bold=True)
+                    elif conf_value > 0.6:
+                        cell.font = Font(color="856404", bold=True)
+                    else:
+                        cell.font = Font(color="721C24", bold=True)
+                except:
+                    pass
+    
+    # Ajustar ancho de columnas
+    column_widths = {
+        'A': 25,  # Nombre_Archivo
+        'B': 15,  # Prediccion
+        'C': 15,  # Diagnostico
+        'D': 12,  # Resultado
+        'E': 12,  # Confianza
+        'F': 15,  # Prob_Benign
+        'G': 15,  # Prob_Malignant
+        'H': 15,  # Prob_Normal
+        'I': 20   # Fecha_Procesamiento
+    }
+    
+    for col, width in column_widths.items():
+        ws.column_dimensions[col].width = width
+    
+    # Agregar hoja de resumen
+    summary_ws = wb.create_sheet("Resumen Métricas")
+    
+    # Calcular métricas para el resumen
+    if 'Resultado' in df.columns:
+        counts = df['Resultado'].value_counts()
+        vp = counts.get('VP', 0)
+        vn = counts.get('VN', 0)
+        fp = counts.get('FP', 0)
+        fn = counts.get('FN', 0)
+        total = vp + vn + fp + fn
+        
+        if total > 0:
+            precision = vp / (vp + fp) if (vp + fp) > 0 else 0
+            sensitivity = vp / (vp + fn) if (vp + fn) > 0 else 0
+            specificity = vn / (vn + fp) if (vn + fp) > 0 else 0
+            f1_score = 2 * (precision * sensitivity) / (precision + sensitivity) if (precision + sensitivity) > 0 else 0
+            accuracy = (vp + vn) / total
+            auc = (sensitivity + specificity) / 2
+            
+            # Encabezado del resumen
+            summary_ws['A1'] = "RESUMEN DE MÉTRICAS - ANÁLISIS DE CÁNCER DE MAMA"
+            summary_ws['A1'].font = Font(size=16, bold=True, color="366092")
+            summary_ws['A1'].alignment = Alignment(horizontal="center")
+            summary_ws.merge_cells('A1:D1')
+            
+            # Fecha del análisis
+            summary_ws['A3'] = f"Fecha de análisis: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            summary_ws['A3'].font = Font(size=12, italic=True)
+            
+            # Tabla de conteos
+            summary_ws['A5'] = "CONTEOS"
+            summary_ws['A5'].font = Font(size=14, bold=True)
+            summary_ws['A5'].fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            summary_ws['A5'].font = Font(color="FFFFFF", bold=True)
+            
+            metrics_data = [
+                ['Categoría', 'Total', 'Porcentaje'],
+                ['VP (Verdaderos Positivos)', vp, f"{(vp/total*100):.1f}%" if total > 0 else "0%"],
+                ['VN (Verdaderos Negativos)', vn, f"{(vn/total*100):.1f}%" if total > 0 else "0%"],
+                ['FP (Falsos Positivos)', fp, f"{(fp/total*100):.1f}%" if total > 0 else "0%"],
+                ['FN (Falsos Negativos)', fn, f"{(fn/total*100):.1f}%" if total > 0 else "0%"],
+                ['TOTAL', total, "100%"]
+            ]
+            
+            for row_idx, row_data in enumerate(metrics_data, 6):
+                for col_idx, value in enumerate(row_data, 1):
+                    cell = summary_ws.cell(row=row_idx, column=col_idx, value=value)
+                    cell.border = thin_border
+                    cell.alignment = Alignment(horizontal="center")
+                    
+                    if row_idx == 6:  # Header
+                        cell.fill = header_fill
+                        cell.font = header_font
+                    elif col_idx == 1 and row_idx > 6:  # Categorías
+                        if 'VP' in str(value):
+                            cell.fill = colors['VP']
+                            cell.font = result_fonts['VP']
+                        elif 'VN' in str(value):
+                            cell.fill = colors['VN']
+                            cell.font = result_fonts['VN']
+                        elif 'FP' in str(value):
+                            cell.fill = colors['FP']
+                            cell.font = result_fonts['FP']
+                        elif 'FN' in str(value):
+                            cell.fill = colors['FN']
+                            cell.font = result_fonts['FN']
+            
+            # Tabla de indicadores
+            summary_ws['A13'] = "INDICADORES DE RENDIMIENTO"
+            summary_ws['A13'].font = Font(size=14, bold=True)
+            summary_ws['A13'].fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            summary_ws['A13'].font = Font(color="FFFFFF", bold=True)
+            
+            indicators_data = [
+                ['Indicador', 'Fórmula', 'Valor'],
+                ['Precisión', 'VP/(VP+FP)', f"{precision:.1%}"],
+                ['Sensibilidad', 'VP/(VP+FN)', f"{sensitivity:.1%}"],
+                ['Especificidad', 'VN/(VN+FP)', f"{specificity:.1%}"],
+                ['F1 Score', '2×(P×S)/(P+S)', f"{f1_score:.1%}"],
+                ['Exactitud', '(VP+VN)/Total', f"{accuracy:.1%}"],
+                ['AUC', '(S+E)/2', f"{auc:.1%}"]
+            ]
+            
+            for row_idx, row_data in enumerate(indicators_data, 14):
+                for col_idx, value in enumerate(row_data, 1):
+                    cell = summary_ws.cell(row=row_idx, column=col_idx, value=value)
+                    cell.border = thin_border
+                    cell.alignment = Alignment(horizontal="center")
+                    
+                    if row_idx == 14:  # Header
+                        cell.fill = header_fill
+                        cell.font = header_font
+                    elif col_idx == 3 and row_idx > 14:  # Valores
+                        try:
+                            val = float(value.replace('%', '')) / 100
+                            if val >= 0.8:
+                                cell.font = Font(color="155724", bold=True)
+                            elif val >= 0.6:
+                                cell.font = Font(color="856404", bold=True)
+                            else:
+                                cell.font = Font(color="721C24", bold=True)
+                        except:
+                            pass
+    
+    # Ajustar columnas del resumen
+    for col in ['A', 'B', 'C', 'D']:
+        summary_ws.column_dimensions[col].width = 20
+    
+    return wb
+
+def create_csv_report(results):
+    """Crear un DataFrame con los resultados (mantener para compatibilidad)"""
+    df = pd.DataFrame(results)
+    df['Fecha_Procesamiento'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    columns_order = ['Nombre_Archivo', 'Prediccion', 'Diagnostico', 'Resultado', 'Confianza', 
+                    'Prob_Benign', 'Prob_Malignant', 'Prob_Normal', 'Fecha_Procesamiento']
+    available_columns = [col for col in columns_order if col in df.columns]
+    df = df[available_columns]
+    
+    return df
+
+# Función para convertir Excel a bytes para descarga
+def excel_to_bytes(workbook):
+    """Convertir workbook de Excel a bytes para descarga"""
+    excel_buffer = io.BytesIO()
+    workbook.save(excel_buffer)
+    excel_buffer.seek(0)
+    return excel_buffer.getvalue()
 
 # Class mapping
 class_mapping = {
@@ -1190,16 +1443,31 @@ if uploaded_files and model is not None:
                     """)
             
             # Download CSV button
+            # st.subheader("💾 Descargar Reporte")
+            # csv_data = df_results.to_csv(index=False, encoding='utf-8-sig')
+            
+            # st.download_button(
+            #     label="📁 Descargar Reporte CSV",
+            #     data=csv_data,
+            #     file_name=f"reporte_clasificacion_cancer_mama_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            #     mime="text/csv"
+            # )
+            
             st.subheader("💾 Descargar Reporte")
-            csv_data = df_results.to_csv(index=False, encoding='utf-8-sig')
-            
-            st.download_button(
-                label="📁 Descargar Reporte CSV",
-                data=csv_data,
-                file_name=f"reporte_clasificacion_cancer_mama_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-            
+            col1, col2 = st.columns(2)
+
+            with col1:
+                # Excel con formato
+                excel_wb = create_excel_report(enhanced_results)
+                excel_data = excel_to_bytes(excel_wb)
+                
+                st.download_button(
+                    label="📊 Descargar Reporte Excel (Formato Profesional)",
+                    data=excel_data,
+                    file_name=f"reporte_cancer_mama_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
             st.success(f"✅ Procesamiento completado. {len(results)} imágenes analizadas.")
         
 else:
