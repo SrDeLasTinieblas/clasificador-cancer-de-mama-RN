@@ -1,7 +1,6 @@
 import streamlit as st
 import tensorflow as tf
 import numpy as np
-from io import BytesIO
 from PIL import Image
 import pandas as pd
 from datetime import datetime
@@ -10,12 +9,10 @@ from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-# Agregar estas importaciones al inicio del archivo
 import io
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
-import base64
 
 def create_excel_report(results):
     """
@@ -1441,17 +1438,6 @@ if uploaded_files and model is not None:
                     - FP: Falsos Positivos
                     - FN: Falsos Negativos
                     """)
-            
-            # Download CSV button
-            # st.subheader("💾 Descargar Reporte")
-            # csv_data = df_results.to_csv(index=False, encoding='utf-8-sig')
-            
-            # st.download_button(
-            #     label="📁 Descargar Reporte CSV",
-            #     data=csv_data,
-            #     file_name=f"reporte_clasificacion_cancer_mama_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            #     mime="text/csv"
-            # )
             
             st.subheader("💾 Descargar Reporte")
             col1, col2 = st.columns(2)
