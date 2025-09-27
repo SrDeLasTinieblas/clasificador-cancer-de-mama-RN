@@ -1,0 +1,16 @@
+# .streamlit/config.toml
+
+[server]
+# Aumentar el límite de upload a 2GB (2048MB)
+maxUploadSize = 2048
+
+# Opcional: Aumentar el timeout para archivos grandes
+maxMessageSize = 2048
+
+# Opcional: Para mejor rendimiento con archivos grandes
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+# Opcional: Mostrar progreso de carga
+gatherUsageStats = false

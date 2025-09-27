@@ -1,0 +1,12 @@
+{
+    "model_name": "breast_cancer_classifier",
+    "version": "1.0.0",
+    "architecture": "DenseNet121",
+    "classes": ["Benign", "Malignant", "Normal"],
+    "input_size": [256, 256, 3],
+    "training_date": "2024-01-15",
+    "training_accuracy": 0.89,
+    "validation_accuracy": 0.87,
+    "dataset_size": 5000,
+    "description": "Clasificador de cáncer de mama basado en ultrasonidos"
+}
