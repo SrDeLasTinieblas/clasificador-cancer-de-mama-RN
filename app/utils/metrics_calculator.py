@@ -9,29 +9,45 @@ class MetricsCalculator:
         self.config = Config()
     
     def extract_diagnosis_from_filename(self, filename):
-        """Extraer diagnóstico del nombre del archivo"""
+        """
+        Extraer diagnóstico del nombre del archivo.
+        CORREGIDO: Revisa palabras completas y en orden correcto.
+        """
         filename_lower = filename.lower()
         
-        if any(word in filename_lower for word in ['maligno', 'malignant', 'cancer', 'malo', 'mal']):
-            return 'Malignant'
+        if any(word in filename_lower for word in ['normal', 'norm', 'sano', 'healthy']):
+            return 'Normal'
+        
         elif any(word in filename_lower for word in ['benigno', 'benign', 'bueno', 'ben']):
             return 'Benign'
-        elif any(word in filename_lower for word in ['normal', 'norm', 'sano', 'healthy']):
-            return 'Normal'
+        
+        elif any(word in filename_lower for word in ['maligno', 'malignant', 'cancer', 'malo']):
+            return 'Malignant'
+        
         else:
             return 'Unknown'
     
     def calculate_classification_result(self, prediction, diagnosis):
-        """Calcular resultado de clasificación (VP, VN, FP, FN)"""
-        if prediction == 'Malignant' and diagnosis == 'Malignant':
-            return 'VP'
-        elif prediction == 'Malignant' and diagnosis != 'Malignant':
-            return 'FP'
-        elif prediction != 'Malignant' and diagnosis == 'Malignant':
-            return 'FN' 
-        else:
-            return 'VN'
-    
+        """
+        Calcular resultado de clasificación (VP, VN, FP, FN)
+        Enfoque binario: Maligno vs No-Maligno (Benign + Normal)
+        """
+
+        if diagnosis == 'Unknown':
+            return 'N/A'
+        
+        es_maligno_real = (diagnosis == 'Malignant')
+        es_maligno_pred = (prediction == 'Malignant')
+        
+        if es_maligno_real and es_maligno_pred:
+            return 'VP' 
+        elif es_maligno_real and not es_maligno_pred:
+            return 'FN'  
+        elif not es_maligno_real and es_maligno_pred:
+            return 'FP'  
+        else:  
+            return 'VN'  
+
     def calculate_real_time_metrics(self, results_df):
         """Calcular métricas en tiempo real"""
         if 'Resultado' not in results_df.columns:
