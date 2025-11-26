@@ -4,11 +4,13 @@ import os
 import tempfile
 from pathlib import Path
 from app.config import Config
+from app.utils.file_downloader import FileDownloader
 
 class ModelManager:
     def __init__(self):
         self.config = Config()
-        
+        self.file_downloader = FileDownloader()
+
         if 'model_loaded' not in st.session_state:
             st.session_state.model_loaded = None
         if 'model_info' not in st.session_state:
@@ -182,14 +184,14 @@ class ModelManager:
                         st.experimental_rerun()
         
         st.markdown("**Opción 2: Ruta del Modelo (Recomendado para archivos grandes)**")
-        
+
         model_path = st.text_input(
-            "Ruta completa al modelo", 
+            "Ruta completa al modelo",
             value=str(self.config.DEFAULT_MODEL_PATH),
             help="Ejemplo: C:/ruta/completa/modelo.h5 o /home/user/modelo.h5",
             key="model_path_input"
         )
-        
+
         path_exists = os.path.exists(model_path) if model_path else False
         if model_path and path_exists:
             try:
@@ -199,7 +201,7 @@ class ModelManager:
                 st.warning("No se puede obtener información del archivo")
         elif model_path:
             st.error("Archivo no encontrado en la ruta especificada")
-        
+
         if st.button("Cargar desde Ruta", disabled=not path_exists, key="btn_path"):
             if path_exists:
                 with st.spinner("Cargando modelo desde ruta..."):
@@ -208,8 +210,88 @@ class ModelManager:
                         st.experimental_rerun()
             else:
                 st.error("Especifica una ruta válida")
-        
-        st.markdown("**Opción 3: Limpiar y Resetear**")
+
+        st.markdown("**Opción 3: Descargar desde Link (Archivos Partidos)**")
+
+        with st.expander("Instrucciones para archivos partidos"):
+            st.markdown("""
+            **Opción A - Desde repositorio de GitHub (Recomendado):**
+            1. Copia el link del directorio de GitHub donde están las partes
+            2. Pega el link completo (ej: https://github.com/user/repo/tree/main/split_model)
+            3. El sistema detectará automáticamente todos los archivos .h5 y .part del directorio
+            4. Se descargarán, unirán y cargarán automáticamente
+
+            **Ejemplo:**
+            ```
+            https://github.com/user/clasificador-cancer-de-mama-RN/tree/main/split_model
+            ```
+
+            **Opción B - URLs directas:**
+            1. Ingresa las URLs de todas las partes del modelo
+            2. Puedes ingresar múltiples URLs separadas por comas o en líneas diferentes
+            3. Las partes se descargarán y unirán automáticamente
+
+            **Ejemplo con URLs separadas por comas:**
+            ```
+            https://ejemplo.com/modelo.h5.part1,
+            https://ejemplo.com/modelo.h5.part2,
+            https://ejemplo.com/modelo.h5.part3
+            ```
+
+            **Ejemplo con URLs en líneas separadas:**
+            ```
+            https://ejemplo.com/modelo.h5.part1
+            https://ejemplo.com/modelo.h5.part2
+            https://ejemplo.com/modelo.h5.part3
+            ```
+            """)
+
+        model_urls = st.text_area(
+            "URL del directorio de GitHub o URLs directas de las partes",
+            height=100,
+            placeholder="Ej: https://github.com/user/repo/tree/main/split_model\nO URLs directas separadas por comas o saltos de línea",
+            help="Ingresa el link del repositorio de GitHub o las URLs directas de las partes del modelo",
+            key="model_urls_input"
+        )
+
+        if model_urls:
+            urls = self.file_downloader.extract_part_urls(model_urls)
+            # st.info(f"Se detectaron {len(urls)} parte(s) para descargar")
+
+            # for i, url in enumerate(urls, 1):
+            #     st.text(f"Parte {i}: {url[:60]}..." if len(url) > 60 else f"Parte {i}: {url}")
+
+        if st.button("Descargar y Unir Modelo", disabled=not bool(model_urls), key="btn_download"):
+            if model_urls:
+                urls = self.file_downloader.extract_part_urls(model_urls)
+
+                if len(urls) == 0:
+                    st.error("No se detectaron URLs válidas")
+                else:
+                    with st.spinner(f"Descargando y cargando {len(urls)} parte(s)..."):
+                        # Usar el nuevo método que carga directamente en memoria
+                        loaded_model = self.file_downloader.download_and_merge_in_memory(urls)
+
+                        if loaded_model:
+                            # Guardar el modelo en session_state
+                            st.session_state.model_loaded = loaded_model
+                            st.session_state.model_info = {
+                                'source': 'download',
+                                'original_name': 'modelo_descargado.h5',
+                                'path': 'Cargado desde memoria',
+                                'size_mb': 0,  # No tenemos el tamaño exacto
+                                'input_shape': loaded_model.input_shape,
+                                'output_shape': loaded_model.output_shape,
+                                'total_params': loaded_model.count_params()
+                            }
+                            st.success("✓ Modelo descargado y cargado exitosamente")
+                            st.experimental_rerun()
+                        else:
+                            st.error("Error descargando o cargando el modelo")
+            else:
+                st.error("Ingresa las URLs de las partes del modelo")
+
+        st.markdown("**Opción 4: Limpiar y Resetear**")
         if st.button("Limpiar Cache y Resetear", key="btn_reset"):
             self.clear_model()
             st.success("Cache limpiado. Puedes cargar un nuevo modelo.")

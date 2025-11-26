@@ -137,7 +137,7 @@ class ReportGenerator:
         for col, width in column_widths.items():
             ws.column_dimensions[col].width = width
         
-        self._create_summary_sheet(wb, df)
+        # self._create_summary_sheet(wb, df)
         
         return self._excel_to_bytes(wb)
     

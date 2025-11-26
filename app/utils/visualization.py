@@ -48,8 +48,8 @@ class MetricsVisualizer:
             self._show_auc_interpretation(metrics['auc'])
         
         # Métricas individuales
-        st.markdown("**🎯 Métricas Individuales**")
-        self._show_individual_metrics(metrics)
+        # st.markdown("**🎯 Métricas Individuales**")
+        # self._show_individual_metrics(metrics)
         
         # Conteos finales
         st.markdown("**🔢 Conteo de Resultados**")

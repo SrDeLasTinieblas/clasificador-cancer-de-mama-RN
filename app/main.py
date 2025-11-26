@@ -288,17 +288,23 @@ def show_instructions():
     with st.expander("📋 Instrucciones de uso"):
         st.markdown("""
         ## 🧠 Carga del Modelo
-        
+
         **Opción 1 - Subir archivo (Recomendado para modelos nuevos):**
         1. Ve a la barra lateral → "Cargar Modelo"
         2. Usa "Subir Archivo" - **Hasta 2GB soportado**
         3. Haz clic en "Cargar Modelo Subido"
-        
+
         **Opción 2 - Especificar ruta (Más rápido):**
         1. Ve a la barra lateral → "Ruta del Modelo"
         2. Ingresa la ruta completa de tu modelo
         3. Haz clic en "Cargar desde Ruta"
-        
+
+        **Opción 3 - Descargar desde link (Para archivos partidos):**
+        1. Ve a la barra lateral → "Descargar desde Link"
+        2. Ingresa las URLs de las partes del modelo (separadas por comas o líneas)
+        3. Haz clic en "Descargar y Unir Modelo"
+        4. Las partes se descargarán, unirán y cargarán automáticamente
+
         **Para cambiar de modelo:**
         - Usa "Limpiar Cache y Resetear" y carga un nuevo modelo
         
