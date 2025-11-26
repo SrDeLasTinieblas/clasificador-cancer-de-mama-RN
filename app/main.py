@@ -11,6 +11,7 @@ from app.utils.image_processing import ImageProcessor
 from app.utils.metrics_calculator import MetricsCalculator
 from app.utils.report_generator import ReportGenerator
 from app.utils.visualization import MetricsVisualizer
+from app.utils.auth import AuthManager
 from app.config import Config
 
 def initialize_components():
@@ -57,10 +58,29 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded"
     )
-    
+
+    # Sistema de autenticación
+    auth_manager = AuthManager()
+
+    # Verificar si el usuario está autenticado
+    if not auth_manager.is_authenticated():
+        # Mostrar formulario de login
+        auth_manager.show_login_form()
+        return
+
+    # Usuario autenticado - mostrar aplicación principal
     st.title('🔬 Clasificador de Cáncer de Mama - Múltiples Imágenes')
     st.markdown("Sube múltiples imágenes de ultrasonido de mama para clasificarlas y obtener un reporte detallado con métricas de evaluación.")
-    
+
+    # Mostrar información del usuario en la barra lateral
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown(f"**👤 Usuario:** {auth_manager.get_current_user()}")
+        if st.button("🚪 Cerrar Sesión", key="logout_btn"):
+            auth_manager.logout()
+            st.experimental_rerun()
+        st.markdown("---")
+
     initialize_components()
     
     model_manager = st.session_state.model_manager
